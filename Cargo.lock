@@ -20,6 +20,7 @@ dependencies = [
  "hyper",
  "jsonrpc-core",
  "log",
+ "regex",
  "reqwest",
  "serde_json",
  "tokio",
