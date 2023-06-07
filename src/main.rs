@@ -1,94 +1,99 @@
+use arti_client::{TorClient, TorClientConfig};
+use arti_hyper::ArtiHttpConnector;
 use axum::http::{Response, StatusCode};
-use axum::{routing::post, Router};
-use hyper::body::Bytes;
-use hyper::Body;
-use jsonrpc_core::Request;
+use axum::{
+    extract::{Json, Path, State},
+    routing::post,
+    Router,
+};
+use hyper::{header::CONTENT_TYPE, Body, Method, Request as HyperRequest};
+use jsonrpc_core::Request as RpcRequest;
 use log::info;
 use regex::Regex;
 use std::net::SocketAddr;
+use tls_api::{TlsConnector as TlsConnectorTrait, TlsConnectorBuilder};
+use tls_api_native_tls::TlsConnector;
+use tor_rtcompat::PreferredRuntime;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    // Define router
-    let app = Router::new().route("/*url", post(tor_proxy));
-    info!("Starting server");
 
+    // Initialise Tor client
+    let config = TorClientConfig::default();
+    info!("Bootstrapping connection to the Tor network...");
+    let tor_client = TorClient::create_bootstrapped(config).await?;
+
+    // Define router
+    let app = Router::new()
+        .route("/*url", post(proxy))
+        .with_state(tor_client);
+
+    info!("Starting server...");
     // Run the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
+    Ok(())
 }
 
-async fn tor_proxy(
-    params: axum::extract::Path<String>,
-    body: Bytes,
+async fn proxy(
+    Path(url): Path<String>,
+    State(tor_client): State<TorClient<PreferredRuntime>>,
+    Json(payload): Json<serde_json::Value>, // TODO: Build a custom extractor that filters in only RPC requests
 ) -> Result<Response<Body>, StatusCode> {
     info!("Received request");
 
-    // Extract the URL path
-    let path = &params.0;
+    println!("{}", url);
 
     // Create a regular expression to match the desired URL pattern
     let pattern = ".*\\.g\\.alchemy\\.com/.*";
     let regex = Regex::new(pattern).unwrap();
 
     // Check if the URL matches the desired pattern
-    if !regex.is_match(path) {
-        info!("{}", path);
+    if !regex.is_match(url.as_str()) {
+        info!("{}", url);
         // Return an error response for disallowed URLs
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let bytes = body.as_ref();
-    let parsed_json: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(value) => value,
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
-    };
-
-    let method_name = parsed_json.get("method").and_then(|v| v.as_str());
+    let method_name = payload.get("method").and_then(|v| v.as_str());
     info!("method_name: {:?}", method_name);
 
-    let request: Request = match serde_json::from_value(parsed_json) {
+    let request: RpcRequest = match serde_json::from_value(payload) {
         Ok(request) => request,
         Err(_) => return Err(StatusCode::BAD_REQUEST),
     };
 
-    // Make sure you are running tor and this is your socks port
-    let proxy = reqwest::Proxy::all("socks5://127.0.0.1:9150").expect("tor proxy should be there");
-    let client = reqwest::Client::builder()
-        .proxy(proxy)
-        .build()
-        .expect("should be able to build reqwest client");
-
     // Add your actual Infura and Alchemy URLs here
-    let target_url = format!("https://{}", *params);
+    let target_url = format!("https://{}", url);
     info!("target_url: {}", target_url);
 
-    // Forward the request
-    let res = client
-        .post(&target_url)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-
-    let axum_response = convert_reqwest_response_to_axum_response(res).await?;
-    Ok(axum_response)
+    // Forward the request through a new, isolated Tor circuit
+    let response = match forward_through_tor(target_url, request, tor_client).await {
+        Ok(response) => response,
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    Ok(response)
 }
 
-async fn convert_reqwest_response_to_axum_response(
-    res: reqwest::Response,
-) -> Result<Response<Body>, StatusCode> {
-    let status_code = res.status().as_u16();
-    let bytes = res
-        .text()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let body = Body::from(bytes);
-    let mut response = Response::new(body);
-    *response.status_mut() = StatusCode::from_u16(status_code).unwrap();
-    Ok(response)
+async fn forward_through_tor(
+    target_url: String,
+    request: RpcRequest,
+    tor_client: TorClient<PreferredRuntime>,
+) -> Result<Response<Body>, Box<dyn std::error::Error>> {
+    let req = HyperRequest::builder()
+        .method(Method::POST)
+        .uri(target_url)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&request)?))?;
+
+    let tls_connector = TlsConnector::builder()?.build()?;
+    let tor_connector = ArtiHttpConnector::new(tor_client, tls_connector);
+    let tor_http = hyper::Client::builder().build::<_, Body>(tor_connector);
+
+    let resp = tor_http.request(req).await?;
+    Ok(resp)
 }
