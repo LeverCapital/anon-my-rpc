@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn proxy(
     Path(url): Path<String>,
     State(tor_client): State<TorClient<PreferredRuntime>>,
-    Json(payload): Json<serde_json::Value>, // TODO: Build a custom extractor that filters in only RPC requests
+    Json(payload): Json<RpcRequest>,
 ) -> Result<Response<Body>, StatusCode> {
     info!("Received request");
 
@@ -59,20 +59,9 @@ async fn proxy(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let method_name = payload.get("method").and_then(|v| v.as_str());
-    info!("method_name: {:?}", method_name);
-
-    let request: RpcRequest = match serde_json::from_value(payload) {
-        Ok(request) => request,
-        Err(_) => return Err(StatusCode::BAD_REQUEST),
-    };
-
-    // Add your actual Infura and Alchemy URLs here
-    let target_url = format!("https://{}", url);
-    info!("target_url: {}", target_url);
-
     // Forward the request through a new, isolated Tor circuit
-    let response = match forward_through_tor(target_url, request, tor_client).await {
+    // TODO: Using the same circuit for all requests right now
+    let response = match forward_through_tor(url, payload, tor_client).await {
         Ok(response) => response,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
@@ -80,15 +69,17 @@ async fn proxy(
 }
 
 async fn forward_through_tor(
-    target_url: String,
-    request: RpcRequest,
+    url: String,
+    payload: RpcRequest,
     tor_client: TorClient<PreferredRuntime>,
 ) -> Result<Response<Body>, Box<dyn std::error::Error>> {
+    // Build the request
+    let target_url = format!("https://{}", url);
     let req = HyperRequest::builder()
         .method(Method::POST)
         .uri(target_url)
         .header(CONTENT_TYPE, "application/json")
-        .body(Body::from(serde_json::to_vec(&request)?))?;
+        .body(Body::from(serde_json::to_vec(&payload)?))?;
 
     let tls_connector = TlsConnector::builder()?.build()?;
     let tor_connector = ArtiHttpConnector::new(tor_client, tls_connector);
