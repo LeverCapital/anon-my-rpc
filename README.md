@@ -1,5 +1,7 @@
 # Anon My RPC
 
+![anonmyrpc-demo](https://github.com/LeverCapital/anon-my-rpc/assets/2914233/7098c893-99cd-468d-90bf-2d33801cf74c)
+
 ## Overview
 
 Anon My RPC is an RPC forwarding service that operates over the Tor network. It allows for secure and anonymous RPC calls to your favourite RPC providers like Alchemy, POKT, Infura etc. It achieves this by routing calls through Tor's anonymising circuits.
