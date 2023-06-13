@@ -1,0 +1,6 @@
+FROM rust:1.69-slim
+EXPOSE 3000
+ENV RUST_LOG=info
+RUN apt-get update && apt-get install -y libsqlite3-dev liblzma-dev libssl-dev
+RUN cargo install cargo-watch
+CMD ["sleep", "infinity"]
