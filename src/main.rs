@@ -59,9 +59,9 @@ async fn proxy(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Forward the request through a new, isolated Tor circuit
-    // TODO: Using the same circuit for all requests right now
-    let response = match forward_through_tor(url, payload, tor_client).await {
+    // Forward every new request through a fresh, isolated Tor circuit
+    let isolated_tor_client = tor_client.isolated_client();
+    let response = match forward_through_tor(url, payload, isolated_tor_client).await {
         Ok(response) => response,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };

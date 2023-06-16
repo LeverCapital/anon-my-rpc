@@ -12,7 +12,6 @@ arti-client = { git = "https://gitlab.torproject.org/tpo/core/arti.git" }
 arti-hyper = { git = "https://gitlab.torproject.org/tpo/core/arti.git" }
 tls-api = "0.9.0"
 tls-api-native-tls = "0.9.0"
-tls-api-openssl = "0.3.2"
 axum = "0.6.18"
 hyper = "0.14.26"
 jsonrpc-core = "18.0.0"
