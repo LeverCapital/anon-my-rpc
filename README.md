@@ -9,9 +9,9 @@ Anon My RPC is an RPC forwarding service that operates over the Tor network. It 
 ## Features
 
 - Prefix based routing for RPC requests.
-- Bootstrapped Tor client to route requests. No need to run your own.
+- Bootstrapped Tor client to route requests. No need to run your own Tor node.
 - JSON RPC request validation and forwarding.
-- Supports calls to Alchemy. (POKT and Infura coming soon)
+- Supports calls to Alchemy and Infura (Others coming soon)
 
 ## Usage
 
