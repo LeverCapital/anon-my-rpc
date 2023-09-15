@@ -9,7 +9,7 @@ use axum::{
 use hyper::{header::CONTENT_TYPE, Body, Method, Request as HyperRequest};
 use jsonrpc_core::Request as RpcRequest;
 use log::info;
-use regex::Regex;
+use regex::RegexSet;
 use std::net::SocketAddr;
 use tls_api::{TlsConnector as TlsConnectorTrait, TlsConnectorBuilder};
 use tls_api_native_tls::TlsConnector;
@@ -46,22 +46,28 @@ async fn proxy(
 ) -> Result<Response<Body>, StatusCode> {
     info!("Received request");
 
+    //TODO: Remove any debug prints
     println!("{}", url);
 
-    // Create a regular expression to match the desired URL pattern
-    let pattern = ".*\\.g\\.alchemy\\.com/.*";
-    let regex = Regex::new(pattern).unwrap();
+    // Create a RegexSet to match against popular Node providers
+    let patterns = RegexSet::new(&[
+        ".*\\.g\\.alchemy\\.com/.*", // Alchemy
+        ".*\\.infura\\.io\\/v3\\/.*" // Infura v3
+    ]).unwrap();
 
-    // Check if the URL matches the desired pattern
-    if !regex.is_match(url.as_str()) {
+    // Check if the request URL matches the desired pattern
+    if !patterns.is_match(url.as_str()) {
         info!("{}", url);
         // Return an error response for disallowed URLs
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Forward every new request through a fresh, isolated Tor circuit
-    let isolated_tor_client = tor_client.isolated_client();
-    let response = match forward_through_tor(url, payload, isolated_tor_client).await {
+    info!("Forwarding request to Tor...");
+
+    // INFO: Using the same Tor circuit for all forwarded requests right now.
+    // Spawning a new circuit per request slows down the proxy. Maybe spawn one per N requests?
+    // let isolated_tor_client = tor_client.isolated_client();
+    let response = match forward_through_tor(url, payload, tor_client).await {
         Ok(response) => response,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
